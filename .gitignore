@@ -1,0 +1,7 @@
+*.pt
+*.pth
+__pycache__/
+.idea/
+data/
+weights/
+runs/
