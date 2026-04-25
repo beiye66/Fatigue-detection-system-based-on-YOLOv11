@@ -273,31 +273,38 @@ python detect_pi.py
 | 推理尺寸 | imgsz=320 | 比 640 快 4 倍，精度损失可接受 |
 | NCNN 线程数 | 4 | 充分利用 Pi 4 的 4 核 CPU |
 
-### 阶段五：时序状态机报警
+### 阶段五：时序状态机报警（`demo.py`）
 
-相比 PC 端的帧数计数（15 帧），Pi 端改用**时间戳状态机**，不受帧率波动影响：
+相比 PC 端的帧数计数（15 帧），Pi 端改用**时间戳状态机**，不受帧率波动影响。完整实现见 [`DrowsinessDetection/demo.py`](DrowsinessDetection/demo.py)，核心逻辑如下：
 
 ```python
-import time
+# 报警阈值
+ALARM_THRES_EYE  = 2.0   # 闭眼持续超过 2.0 秒触发报警
+ALARM_THRES_YAWN = 3.0   # 打哈欠持续超过 3.0 秒触发报警
 
-CLOSED_THRESHOLD = 2.0   # 闭眼超过 2 秒触发报警
-YAWN_THRESHOLD   = 3.0   # 打哈欠超过 3 秒触发报警
+time_closed_eye_start = None
+time_yawn_start = None
 
-closed_start = None
-yawn_start   = None
-
-# 每帧检测逻辑
-if label == 'Eyeclosed':
-    if closed_start is None:
-        closed_start = time.time()
-    elif time.time() - closed_start > CLOSED_THRESHOLD:
-        print("⚠️  疲劳报警：持续闭眼！")
-        # 在画面上叠加红色文字
+# 每帧逻辑
+if is_eye_closed_now:
+    if time_closed_eye_start is None:
+        time_closed_eye_start = time.time()          # 记录开始时间
+    elif time.time() - time_closed_eye_start > ALARM_THRES_EYE:
+        cv2.putText(frame, "ALARM: WAKE UP!!!", ...)  # 屏幕红色字
+        print("\033[91m[危险] 检测到长时间闭眼！\033[0m")  # 终端红色输出
 else:
-    closed_start = None
+    time_closed_eye_start = None                      # 睁眼即清零
 ```
 
-> 时间戳方案的优势：帧率从 8 FPS 变化到 15 FPS 时，阈值判断仍然准确；帧数方案在帧率不稳定时会产生偏差。
+在树莓派上运行 demo：
+
+```bash
+export DISPLAY=:0   # 将画面推送到外接显示屏
+cd /home/pi/Fatigue/DrowsinessDetection
+python demo.py
+```
+
+> **时间戳方案的优势**：帧率从 8 FPS 波动到 15 FPS 时，2 秒阈值仍然准确；帧数方案（如 PC 端的 15 帧）在帧率不稳定时会产生误差。
 
 ### 部署效果对比
 
