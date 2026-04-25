@@ -193,7 +193,119 @@ python train.py
 | mAP50 | ~93% |
 | mAP50-95 | ~75.3% |
 | 训练轮数 | 50（早停） |
-| 推理速度 | ~30ms/帧（GPU） |
+| 推理速度（GPU） | ~30ms/帧 |
+| 推理速度（Pi 4 NCNN） | ~8–15 FPS |
+
+---
+
+## 🍓 树莓派 4 部署
+
+本项目已完整部署至树莓派 4，实现端侧实时疲劳检测，以下为完整流程。
+
+### 阶段一：模型轻量化（PC 端）
+
+树莓派无 GPU，直接运行 PyTorch `.pt` 模型帧率极低。使用 **NCNN** 格式（专为 ARM 架构优化）将模型压缩并加速：
+
+```bash
+# 在 Windows/PC 端执行
+python -c "
+from ultralytics import YOLO
+m = YOLO('./weights/drowsiness-best.pt')
+m.export(format='ncnn', imgsz=320, simplify=True)
+"
+```
+
+> 导出过程中 ultralytics 会自动下载 PNNX 工具，通过 TorchScript → PNNX → NCNN 的转换链生成：
+> - `model.ncnn.param`（网络结构）
+> - `model.ncnn.bin`（权重）
+
+### 阶段二：跨设备文件传输
+
+通过局域网 SCP 将模型推送到树莓派：
+
+```bash
+# 在 PC 端新开一个终端执行（不是 SSH 窗口）
+scp -r "DrowsinessDetection/weights/drowsiness-best_ncnn_model" pi@192.168.x.x:/home/pi/Fatigue/weights/
+
+# 或直接在树莓派上 git clone 项目代码
+git clone https://github.com/beiye66/Fatigue-detection-system-based-on-YOLOv11.git
+```
+
+### 阶段三：树莓派端环境搭建
+
+```bash
+# 创建虚拟环境（隔离系统环境）
+python3 -m venv ~/fatigue_env
+source ~/fatigue_env/bin/activate
+
+# 使用清华镜像源加速安装
+pip install torch torchvision ultralytics ncnn opencv-python \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+**空间不足的解决方法**（SD 卡分区未释放时常见）：
+
+```bash
+# 清理 pip 缓存
+pip cache purge
+
+# 指定临时目录到 SD 卡空间（绕过 /tmp 内存盘限制）
+export TMPDIR=/home/pi/tmp
+mkdir -p $TMPDIR
+pip install ...
+```
+
+### 阶段四：端侧运行
+
+树莓派通过 SSH 连接时没有 GUI，使用 `DISPLAY` 重定向将画面推送到外接显示屏：
+
+```bash
+# 将 OpenCV 画面输出到外接显示屏
+export DISPLAY=:0
+python detect_pi.py
+```
+
+**关键调优参数：**
+
+| 参数 | 设定值 | 原因 |
+|------|--------|------|
+| 摄像头分辨率 | 640×480 | 降低采集开销，适配 Pi 4 算力 |
+| 推理尺寸 | imgsz=320 | 比 640 快 4 倍，精度损失可接受 |
+| NCNN 线程数 | 4 | 充分利用 Pi 4 的 4 核 CPU |
+
+### 阶段五：时序状态机报警
+
+相比 PC 端的帧数计数（15 帧），Pi 端改用**时间戳状态机**，不受帧率波动影响：
+
+```python
+import time
+
+CLOSED_THRESHOLD = 2.0   # 闭眼超过 2 秒触发报警
+YAWN_THRESHOLD   = 3.0   # 打哈欠超过 3 秒触发报警
+
+closed_start = None
+yawn_start   = None
+
+# 每帧检测逻辑
+if label == 'Eyeclosed':
+    if closed_start is None:
+        closed_start = time.time()
+    elif time.time() - closed_start > CLOSED_THRESHOLD:
+        print("⚠️  疲劳报警：持续闭眼！")
+        # 在画面上叠加红色文字
+else:
+    closed_start = None
+```
+
+> 时间戳方案的优势：帧率从 8 FPS 变化到 15 FPS 时，阈值判断仍然准确；帧数方案在帧率不稳定时会产生偏差。
+
+### 部署效果对比
+
+| 运行环境 | 推理后端 | 帧率 |
+|----------|---------|------|
+| PC（GTX 1650 Ti） | PyTorch CUDA | ~33 FPS |
+| 树莓派 4（PyTorch CPU） | PyTorch | ~1 FPS |
+| 树莓派 4（NCNN） | NCNN ARM 优化 | ~8–15 FPS |
 
 ---
 
