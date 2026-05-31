@@ -1,0 +1,18 @@
+name: AI PR Review
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+permissions:
+  contents: read
+  pull-requests: write   # 让 Action 能在 PR 下发评论
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: beiye66/LogicGuard-PR@main   # 直接引用本 Action，无需拷贝代码
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}   # Actions 自动提供，无需手动配置
+          llm-api-key: ${{ secrets.LLM_API_KEY }}
+          llm-base-url: ${{ vars.LLM_BASE_URL }}       # 例：https://api.deepseek.com
+          llm-model: ${{ vars.LLM_MODEL }}             # 例：deepseek-chat / gemini-2.5-flash / claude-sonnet-4-6
+          llm-provider: ${{ vars.LLM_PROVIDER }}       # 可选：openai / anthropic（留空按模型名推断）
